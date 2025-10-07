@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+
+# Load in the launch_array function
+launcher_script_dir="${launcher_script_dir:-"$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"}"
+launcher_name="${launcher_name:-"qutebrowser"}"
+current_launcher="base_launcher"
+
+function base_launcher {
+    local history_file="$launcher_script_dir/$launcher_name"
+    tofi --width="100%" --history=true --history-file=$history_file --require-match=false --prompt-text="URL: "
+}
+
+function quickmark_launcher {
+    local history_file="$launcher_script_dir/$launcher_name-quickmark"
+    tofi --width="100%" --history=true --history-file=$history_file --fuzzy-match=true --prompt-text="Quickmark: "
+}
+
+function history_launcher {
+    local history_file="$launcher_script_dir/$launcher_name-history"
+    tofi --width="100%" --history=true --history-file=$history_file --fuzzy-match=true --prompt-text="History: "
+}
+
+function session_launcher {
+    local history_file="$launcher_script_dir/$launcher_name-session"
+    tofi --width="100%" --history=true --history-file=$history_file --fuzzy-match=true --prompt-text="Session: "
+}
+
+
+function launcher {
+    case "$current_launcher" in
+        "base_launcher")
+            base_launcher "$@"
+            ;;
+        "quickmark_launcher")
+            quickmark_launcher "$@"
+            ;;
+        "history_launcher")
+            history_launcher "$@"
+            ;;
+        "session_launcher")
+            session_launcher "$@"
+            ;;
+    esac
+}
+
+source "$LAUNCHERS/launch_array/launch_array"
+
+config_path="$CONFIG/qutebrowser"
+data_path="$DATA/qutebrowser"
+
+function get_quickmarks {
+    declare -gA quickmarks
+    while IFS= read -r line; do
+        quickmark_name="${line% *}"
+        url="${line##* }"
+        quickmarks["$quickmark_name ($url) {Quickmark}"]="echo $url"
+    done < "$config_path/quickmarks"
+}
+
+function get_histories {
+    local max_hist=500
+    local hist_file="$data_path/history.sqlite"
+    # Declare the associative array
+    declare -gA histories
+
+    # Fetch URL and title, then populate the array
+    while IFS=, read -r url title; do
+        histories["$title ($url) {History}"]="echo $url"
+    done < <(sqlite3 -csv "$hist_file" "SELECT url, title FROM CompletionHistory ORDER BY last_atime DESC LIMIT $max_hist;")
+}
+
+function get_sessions {
+    declare -gA sessions
+    for yml in "$data_path"/sessions/*.yml; do
+        local session="${yml##*/}"
+        session="${session%.*}"
+
+        if [[ "$session" != "_autosave" ]]; then
+            # Extract URLs in one step with grep and awk
+            local urls=$(grep -oP 'url: \K\S+' "$yml" | tr '\n' ' ')
+            sessions["$session {Session}"]="echo restore $urls"
+        fi
+    done
+}
+
+function launch_quickmarks {
+    declare -A array
+    for key in "${!quickmarks[@]}"; do
+        array[$key]=${quickmarks[$key]}
+    done
+    echo "$(launch_array $(typeset -p array))"
+}
+
+function launch_histories {
+    declare -A array
+    for key in "${!histories[@]}"; do
+        array[$key]=${histories[$key]}
+    done
+    echo "$(launch_array $(typeset -p array))"
+}
+
+function launch_sessions {
+    declare -A array
+    for key in "${!sessions[@]}"; do
+        array[$key]=${sessions[$key]}
+    done
+    echo "$(launch_array $(typeset -p array))"
+}
+
+function launch_qutebrowser {
+    declare -A array
+    for key in "${!quickmarks[@]}"; do
+        array[$key]=${quickmarks[$key]}
+    done
+    for key in "${!histories[@]}"; do
+        array[$key]=${histories[$key]}
+    done
+    for key in "${!sessions[@]}"; do
+        array[$key]=${sessions[$key]}
+    done
+    array["Quickmarks"]="echo launch_quickmarks"
+    array["History"]="echo launch_histories"
+    array["Sessions"]="echo launch_sessions"
+    array["Private"]="echo launch_private"
+    array["New"]="echo launch_new"
+    local cmd="$(launch_array $(typeset -p array))"
+    case "$cmd" in
+        "launch_quickmarks")
+            current_launcher="quickmark_launcher"
+            cmd="$(launch_quickmarks)"
+            ;;
+        "launch_histories")
+            current_launcher="history_launcher"
+            cmd="$(launch_histories)"
+            ;;
+        "launch_sessions")
+            current_launcher="session_launcher"
+            cmd="$(launch_sessions)"
+            ;;
+        "launch_private")
+            cmd="private $(launch_qutebrowser)"
+            ;;
+        "launch_new")
+            cmd="new_qutebrowser"
+            ;;
+    esac
+    echo "$cmd"
+}
+
+function is_type {
+    local arg_type="$1"
+    shift
+    local arg="$(echo "$@" | awk ' { print $1 } ')"
+    if [[ "$arg" == "$arg_type" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+function is_private {
+    is_type "private" "$@"
+}
+
+function is_restore {
+    is_type "restore" "$@"
+}
+
+function is_quickmark {
+    is_type "quickmark" "$@"
+}
+
+function is_history {
+    is_type "history" "$@"
+}
+
+function is_session {
+    is_type "session" "$@"
+}
+
+function exec_qutebrowser {
+    local cmd="${@:-$(launch_qutebrowser)}"
+    echo "$cmd" >&2
+    if [ ! -n "$cmd" ]; then
+        return 0
+    fi
+
+    # See if private browsing
+    local target="window"
+    if is_private "$cmd"; then
+        target="private-window"
+        cmd="$(echo "$cmd" | cut -d " " -f2-)"
+    fi
+
+    if is_restore "$cmd"; then
+        if ! pgrep qutebrowser; then
+            cmd=":open $(echo "$cmd" | cut -d " " -f2- | sed -r 's/ / ;; open -t /g')"
+            notify-send "Restoring browser - $target:$cmd"
+            qutebrowser -R --target="$target" "$cmd"
+        else
+            cmd="$(echo "$cmd" | cut -d " " -f2-)"
+            notify-send "Restoring browser - $target:$cmd"
+            qutebrowser -R --target="$target" "$(echo "$cmd" | awk '{print $1}')"
+            # If there's any more urls, then open them
+            if [[ $cmd = *' '* ]]; then
+                cmd=":open -t $(echo "$cmd" | cut -d " " -f2- | sed -r 's/ / ;; open -t /g')"
+                notify-send "Launching browser - $target:$cmd"
+                qutebrowser "$cmd"
+            fi
+        fi
+    else
+        # Handle New option
+        if [[ "$cmd" == "new_qutebrowser" ]]; then
+            notify-send "Launching browser - $target:$cmd"
+            browser --target="$target"
+        else
+            notify-send "Launching browser - $target:$cmd"
+            browser --target="$target" "$cmd"
+        fi
+    fi
+}
+
+function parse {
+    local args=""
+    if [[ ! -n "$@" ]]; then
+        :
+    elif is_session "$@"; then
+        shift
+        args="echo restore"
+        while test $# -gt 0; do
+            args="$args $(echo "${sessions["$1 {Session}"]}")"
+            shift
+        done
+    else
+        args="echo $@"
+    fi
+    if [[ -n "$args" ]]; then
+        eval "$args"
+    else
+        echo ""
+    fi
+}
+
+get_quickmarks
+get_histories
+get_sessions
+exec_qutebrowser "$(parse "$@")"

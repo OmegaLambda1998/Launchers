@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+# Session managing launcher
+# Load in the launch_array function
+launcher_script_dir="${launcher_script_dir:-"$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"}"
+launcher_name="${launcher_name:-"power"}"
+source "$LAUNCHERS/launch_array/launch_array"
+
+function launcher {
+    local history_file="$launcher_script_dir/$launcher_name-history"
+    tofi --history=true --history-file="$history_file" --prompt-text="Power: "
+}
+
+function launch_session {
+    sidle="$CONFIG/sway/idle/sidle/sidle -v"
+    declare -A array=(
+        ["Shutdown"]="systemctl poweroff"
+        ["Reboot"]="systemctl reboot"
+        ["Reboot (uefi)"]="systemctl reboot --firmware-setup"
+        ["Logout"]="loginctl terminate-session self"
+        ["Sleep"]="$sidle suspend_system"
+        ["Hibernate"]="systemctl hibernate"
+        ["Lock"]="loginctl lock-session self"
+    )
+
+    launch_array $(typeset -p array)
+}
+
+launch_session

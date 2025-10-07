@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+# Provides the `launch_array` which takes a bash associative array, provides the keys to a launcher, and treats the value associated with the selected key as a command to run.
+
+#
+### Usage
+#
+# 1. source "/path/to/launch_array/launch_array"
+# 2. create an associative array which *must* be called array
+#    declare -A array=(
+#       ["key"]="value"
+#   )
+#   $key can be any human readable string
+#   $value is assumed to be an execulatable and *will* be executed if selected
+#
+#   Pass $array to launch_array via: launch_array $(typeset -p array)
+#
+#   In addition you can modify the behaviour by first defining:
+#       - launcher_script_dir: The directory which houses the script calling launch_array. If you copy the definition belowe then the script directory will be set regardless where your script is run.
+#       - launcher_name: The name of the launcher
+#       - launcher() {}: A function called launcher which will accept the newline delimited string of launch options
+#
+#       If you do not provied launcher(), then a simple tofi launcher which saves history in "$launcher_script_dir/$launcher_name-history" will be used.
+
+launcher_script_dir="${launcher_script_dir:-"$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"}"
+launcher_name="${launcher_name:-"array"}"
+
+# The launcher and any args. The set of keys will be piped in as a string with newline delimiters
+# Only define launcher function if it doesn't exist already
+function array_launcher {
+    if typeset -f launcher > /dev/null; then
+        echo "$@" | launcher
+    else
+        local history_file="$launcher_script_dir/$launcher_name-history"
+        echo "$@" | tofi --history=true --history-file=$history_file
+    fi
+}
+
+function launch_array {
+    local opts=$(printf '%s\n' "${!array[@]}")
+    local key="$(array_launcher "$opts")"
+    if [ -n "$key" ]; then
+        local cmd="${array[$key]}"
+        if [ -n "$cmd" ]; then
+            exec $cmd
+        else
+            echo "$key"
+        fi
+    fi
+}

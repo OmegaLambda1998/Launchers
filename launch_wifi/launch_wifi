@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+
+function launcher {
+    local device="$(get_device)"
+    tofi --history=false --prompt-text="$device:"
+}
+
+#
+### --- VPN ---
+#
+
+function vpn_connected {
+    ip link | grep tun0 > /dev/null
+}
+
+function connect_vpn {
+    gp-saml-gui -P --allow-insecure-crypto --no-verify --gateway "gpgw2.anu.edu.au"
+}
+
+#
+### --- connection functions
+#
+
+function get_device {
+    local device="$(iwctl station list | sed -e 's/\x1b\[.\{1,5\}m//g' | awk 'FNR > 4 { print $1 }' )"
+    if [ "$device" == "No" ]; then
+        device=""
+    fi
+    echo "$device"
+}
+
+function get_active_connection {
+    local device="$(get_device)"
+    echo "$(iwctl station "$device" show | sed -e 's/\x1b\[.\{1,5\}m//g' | awk '/network/ {print $3}')"
+}
+
+function get_available_connections {
+    echo "$(iwctl station wlan0 get-networks | sed -e 's/\x1b\[.\{1,5\}m//g' | awk -F' {2,}' 'FNR > 4 { if ($2 == ">") print $3; else print $2 }')"
+}
+
+function rescan {
+    local device="$(get_device)"
+    iwctl station "$device" scan
+    if [ "$1" == "-r" ]; then
+        launch_wifi
+    fi
+}
+
+function get_previous_connections {
+    echo "$(iwctl known-networks list | sed -e 's/\x1b\[.\{1,5\}m//g' | awk -F' {2,}' 'FNR > 4 { print $2 }')"
+}
+
+function connection_up {
+    local device="$(get_device)"
+    notify-send "Connecting to $1"
+    iwctl station "$device" connect "$1"
+}
+
+function connection_down {
+    local device="$(get_device)"
+    notify-send "Disconnecting from $1"
+    iwctl station "$device" disconnect "$1"
+}
+
+function connection_toggle {
+    local con_status="$(get_active_connection)"
+    if [ "$con_status" != "" ]; then
+        connection_down "$1"
+    else
+        connection_up "$1"
+    fi
+}
+
+function new_connection {
+    local device="$(get_device)"
+    local prompt="Password:"
+    local pwd="$(echo "" | tofi --prompt-text="$prompt" --require-match=false --hide-input=true)"
+    local connected=""
+    iwctl --passphrase "$pwd" station "$device" connect "$1" && connected="yes"
+    if [ "$connected" != "" ]; then
+        connection_up "$1"
+    else
+        notify-send "Error connecting to $1"
+        killall iwctl
+    fi
+}
+
+function attempt_connection {
+    echo "Attempting connection for $1"
+    local attempts="${2:-0}"
+    local max_attempts=3
+    if [ "$attempts" -ge "$max_attempts" ]; then
+        notify-send "Connection to $1 failed $max_attempts times, giving up"
+    else
+        rescan
+        local available_connections="$(get_available_connections)"
+        local previous_connections="$(get_previous_connections)"
+
+        # First see if it's an accessible connection
+        if grep -q "$1" <<< "$available_connections"; then
+            # If we have previously connected, just try to connect
+            if grep -q "$1" <<< "$previous_connections"; then
+                connection_up "$1"
+                # Otherwise add it as a new connection
+            else
+                new_connection "$1"
+            fi
+        else
+            attempt_connection "$1" "$((attempts + 1))"
+        fi
+    fi
+}
+
+#
+### --- launcher
+#
+
+function wifi_launcher {
+
+    declare -a options
+
+    # Active Connection Options
+    local active_connection="$(get_active_connection)"
+    if [ "$active_connection" != "" ]; then
+        options+=( '[ Active Connection ]' )
+        options+=( "$active_connection" )
+        options+=( 'newline' )
+    fi
+
+    # Available Connections Options
+    local available_connections="$(get_available_connections)"
+    options+=( 'Rescan Available Connections' )
+    options+=( '[ Available Connections ]' )
+    options+=( "$available_connections" )
+    options+=( 'newline' )
+
+    # VPN
+    options+=( '[ VPN ]' )
+    if ! vpn_connected; then
+        options+=( 'Connect to VPN' )
+    else
+        options+=( 'VPN Connected' )
+    fi
+    options+=( 'newline' )
+
+    local input=""
+    for ((i = 0; i < ${#options[@]}; i++)); do
+        line="${options[$i]}"
+        if [ "$line" == "newline" ]; then
+            input="$input"$' \n'
+        else
+            input="$input$line"$'\n'
+        fi
+    done
+
+    echo "$(echo "$input" | launcher)"
+}
+
+function wifi_exec {
+    local active_connection="$(get_active_connection)"
+    local available_connections="$(get_available_connections)"
+    local input="$@"
+    local choice="$input"
+
+    if [ "$input" == "$active_connection" ]; then
+        choice="Toggle"
+    elif grep -q "$input" <<< "$available_connections"; then
+        choice="Connect"
+    fi
+
+    case $choice in
+        "Connect to VPN")
+            connect_vpn
+            ;;
+        "Rescan Available Connections")
+            rescan "-r"
+            ;;
+        "Toggle")
+            connection_toggle "$input"
+            ;;
+        "Connect")
+            attempt_connection "$input"
+            ;;
+    esac
+}
+
+function launch_wifi {
+    local opt="$(wifi_launcher)"
+    if [ "$opt" != "" ]; then
+        wifi_exec "$opt"
+    fi
+}
+
+launch_wifi

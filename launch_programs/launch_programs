@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+launcher_script_dir="${launcher_script_dir:-"$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"}"
+launcher_name="${launcher_name:-"programs"}"
+
+function launch_programs {
+    local history_file="$launcher_script_dir/$launcher_name-history"
+    tofi-drun --history=true --history-file=$history_file --fuzzy-match=true --drun-launch=true
+}
+
+launch_programs

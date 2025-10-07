@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+# Load in the launch_array function
+launcher_script_dir="${launcher_script_dir:-"$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"}"
+launcher_name="${launcher_name:-"papers"}"
+
+
+function launcher {
+    local history_file="$launcher_script_dir/$launcher_name-history"
+    tofi --width="100%" --history=true --history-file=$history_file --prompt-text="Paper: "
+}
+
+function launch_papers {
+    local opts="$(ol_papers --skip bib show -t id -t title -t author)"
+    local result="$(echo "$opts" | launcher)"
+    if [ -n "$result" ]; then
+        local id="$(echo "$result" | awk ' { print $1 } ')"
+        local pdf="$PAPERS/.database/$id.pdf"
+        if [ -f "$pdf" ]; then
+            xdg-open "$pdf"
+        fi
+    fi
+}
+
+launch_papers "$@"
