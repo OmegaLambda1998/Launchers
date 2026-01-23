@@ -14,7 +14,7 @@ function vpn_connected {
 }
 
 function connect_vpn {
-    gp-saml-gui -P --allow-insecure-crypto --no-verify --gateway "gpgw2.anu.edu.au"
+    $TERM start -- $SHELL -is eval gp-saml-gui -P --allow-insecure-crypto --no-verify --gateway "gpgw2.anu.edu.au"
 }
 
 #
