@@ -1,6 +1,6 @@
 56 "Watch Later - YouTube" (https://www.youtube.com/playlist?list=WL) {History}
 34 Sessions
-29 music {Session}
+31 music {Session}
 28 Youtube Watch List [Entertainment] {wl} (youtube.com/playlist?list=WL) {Quickmark}
 22 Private
 19 mail {Session}
@@ -204,3 +204,5 @@
 1 JupyterLab (http://localhost:8888/lab) {History}
 1 tensorboard (http://localhost:6006) {Quickmark}
 1 watch_later (https://www.youtube.com/playlist?list=WL) {Quickmark}
+1 "Waybar/subprojects/gtk-layer-shell.wrap at 2f9443501403a11e5d7e28ab05801debabefa2a8 · Alexays/Waybar" (https://github.com/Alexays/Waybar/blob/2f9443501403a11e5d7e28ab05801debabefa2a8/subprojects/gtk-layer-shell.wrap#L3) {History}
+1 rocm (https://repo.radeon.com/rocm/manylinux/) {Quickmark}
